@@ -374,4 +374,145 @@ public function index(): View
         ]);
     }
 
+    public function marketplaceOnlineOrders()
+    {
+        $orders = DB::table('marketplace_orders as mo')
+            ->join('users as u', 'mo.user_id', '=', 'u.id')
+            ->select(
+                'mo.id',
+                'mo.code',
+                'mo.pickup_name',
+                'mo.phone',
+                'mo.total_price',
+                'mo.created_at',
+                'mo.status',
+                'u.name as customer_name'
+            )
+            ->whereIn('mo.status', ['pending_pickup','processing','completed'])
+            ->orderBy('mo.created_at', 'asc')
+            ->get();
+
+    $payment_methods = PaymentMethod::whereRaw('LOWER(name) = ?', ['tunai'])
+    ->orderBy('name')
+    ->get();
+
+    return view('transaction.marketplace-online', [
+        'orders'          => $orders,
+        'payment_methods' => $payment_methods,
+    ]);
+    }
+
+    /**
+     * Kembalikan detail item untuk pesanan marketplace sebagai tampilan HTML.
+     * Rute ini dipanggil melalui AJAX ketika pengguna klik tombol "Detail".
+     */
+    public function marketplaceOrderItems($orderId)
+    {
+        $order = DB::table('marketplace_orders')->find($orderId);
+        if (!$order) {
+            abort(404, 'Pesanan tidak ditemukan');
+        }
+
+        $items = DB::table('marketplace_order_items as moi')
+            ->join('items as i', 'moi.item_id', '=', 'i.id')
+            ->select(
+                'i.name',
+                'moi.qty',
+                'moi.price',
+                DB::raw('moi.price * moi.qty as subtotal')
+            )
+            ->where('moi.order_id', $orderId)
+            ->get();
+
+        // menampilkan detail item dalam view blade sederhana
+        return view('transaction.marketplace-order-items', [
+            'order' => $order,
+            'items' => $items,
+        ]);
+    }
+
+    /**
+     * Proses pesanan marketplace: verifikasi metode pembayaran, hitung jumlah uang & kembalian,
+     * simpan transaksi, lalu ubah status pesanan menjadi completed.
+     */
+    // app/Http/Controllers/TransactionController.php
+
+public function processMarketplaceOrder($orderId)
+{
+    $order = DB::table('marketplace_orders')->where('id', $orderId)->first();
+    if (!$order || $order->status !== 'pending_pickup') {
+        return response()->json([
+            'status'  => 'error',
+            'message' => 'Pesanan tidak valid atau sudah diproses.'
+        ], 422);
+    }
+
+    DB::transaction(function () use ($order) {
+        // Gunakan metode pembayaran default, misalnya Tunai
+        $payment = PaymentMethod::whereRaw('LOWER(name) = ?', ['tunai'])->first()
+                  ?? PaymentMethod::first();
+
+        // Generate invoice baru
+        $today   = now()->format('dmy');
+        $last    = DB::table('transactions')
+            ->whereDate('created_at', now()->toDateString())
+            ->orderByDesc('id')
+            ->first();
+        $seq     = $last ? ((int) $last->invoice_no + 1) : 1;
+        $invoice = $today . str_pad($seq, 4, '0', STR_PAD_LEFT);
+
+        // ... kode lain ...
+
+        $trxId = DB::table('transactions')->insertGetId([
+            'user_id'           => auth()->id(),
+            'channel'           => 'online',
+            'payment_status'    => 'paid',
+            'pickup_status'     => 'picked_up',
+            'pickup_code'       => $order->code,
+            'customer_id'       => null, // jangan mengisi id user di sini karena tidak ada di tabel customers
+            'invoice'           => $invoice,
+            'invoice_no'        => (string) $seq,
+            'total'             => (int) $order->total_price,
+            'discount'          => 0,
+            'payment_method_id' => $payment->id,
+            'amount'            => (int) $order->total_price,
+            'change'            => 0,
+            'status'            => 'paid',
+            'note'              => 'Marketplace pickup: ' . $order->pickup_name . ' (' . $order->phone . ')',
+            'created_at'        => now(),
+            'updated_at'        => now(),
+        ]);
+
+
+        // Simpan detail transaksi
+        $items = DB::table('marketplace_order_items')
+            ->where('order_id', $order->id)
+            ->get();
+
+        foreach ($items as $i) {
+            DB::table('transaction_details')->insert([
+                'transaction_id' => $trxId,
+                'item_id'        => $i->item_id,
+                'qty'            => (int) $i->qty,
+                'item_price'     => (int) $i->price,
+                'total'          => (int) $i->price * (int) $i->qty,
+                'created_at'     => now(),
+                'updated_at'     => now(),
+            ]);
+        }
+
+        // Update status pesanan menjadi completed
+        DB::table('marketplace_orders')->where('id', $order->id)->update([
+            'status'     => 'completed',
+            'updated_at' => now(),
+        ]);
+    });
+
+    return response()->json([
+        'status'  => 'success',
+        'message' => 'Pesanan berhasil diselesaikan.'
+    ]);
+}
+
+
 }

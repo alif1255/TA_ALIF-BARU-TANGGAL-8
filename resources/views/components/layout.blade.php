@@ -474,6 +474,7 @@
       return prefix == undefined ? rupiah : (rupiah ? 'Rp. ' + rupiah : '');
     }
   </script>
+  @stack('scripts')
 </body>
 
 </html>

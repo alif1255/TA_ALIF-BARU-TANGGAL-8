@@ -1,26 +1,23 @@
-<table class="table table-bordered mb-0">
-    <thead>
-        <tr>
-            <th style="width: 10%">#</th>
-            <th>Nama Barang</th>
-            <th style="width: 15%">Harga</th>
-            <th style="width: 10%">Qty</th>
-            <th style="width: 15%">Subtotal</th>
-        </tr>
-    </thead>
-    <tbody>
-        @forelse($items as $item)
+{{-- resources/views/transaction/marketplace-order-items.blade.php --}}
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
             <tr>
-                <td>{{ $loop->iteration }}</td>
-                <td>{{ $item->name }}</td>
-                <td>@indo_currency($item->price)</td>
-                <td>{{ $item->qty }}</td>
-                <td>@indo_currency($item->price * $item->qty)</td>
+                <th>Nama Produk</th>
+                <th>Qty</th>
+                <th>Harga</th>
+                <th>Subtotal</th>
             </tr>
-        @empty
-            <tr>
-                <td colspan="5" class="text-center text-muted">Tidak ada item pada pesanan ini.</td>
-            </tr>
-        @endforelse
-    </tbody>
-</table>
+        </thead>
+        <tbody>
+            @foreach($items as $item)
+                <tr>
+                    <td>{{ $item->name }}</td>
+                    <td>{{ $item->qty }}</td>
+                    <td>@indo_currency($item->price)</td>
+                    <td>@indo_currency($item->subtotal)</td>
+                </tr>
+            @endforeach
+        </tbody>
+    </table>
+</div>

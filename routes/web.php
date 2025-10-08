@@ -73,6 +73,9 @@ Route::middleware('guest')->group(function () {
     Route::post('/customer/login', [AuthenticatedSessionController::class, 'storeCustomer'])->name('customer.login.post');
 });
 
+Route::post('transaction/marketplace-online-orders/{order}/process', [TransactionController::class, 'processMarketplaceOrder']);
+
+
 /* ============================
    AUTH (internal apps)
    ============================ */
@@ -93,19 +96,7 @@ Route::middleware('auth')->group(function () {
         ->name('transaction.online');
     Route::post('/transaction/online-orders/{order}/process', [TransactionController::class, 'processOnline'])
     ->name('transaction.online.process');
-
-    // Pesanan marketplace menunggu diambil
-Route::get('/transaction/marketplace-online-orders', [TransactionController::class, 'marketplaceOnlineOrders'])
-    ->name('transaction.marketplace.online');
-
-// Menampilkan detail item untuk pesanan marketplace tertentu
-Route::get('/transaction/marketplace-online-orders/{order}/items', [TransactionController::class, 'marketplaceOrderItems'])
-    ->name('transaction.marketplace.items');
-
-// Memproses pesanan marketplace (pembayaran dan pengambilan)
-Route::post('/transaction/marketplace-online-orders/{order}/process', [TransactionController::class, 'processMarketplaceOrder'])
-    ->name('transaction.marketplace.process');
-
+                        
 
 
     /*
