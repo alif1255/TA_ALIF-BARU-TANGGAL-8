@@ -1,88 +1,142 @@
 <x-layout>
-  <x-slot:title>Buat Purchase Order</x-slot:title>
+    <!--
+      This view renders the form for creating a new Purchase Order (PO).
+      To maintain visual consistency with other internal pages, the layout uses
+      Bootstrap‑style cards and form groups rather than raw Tailwind classes.
+      When a supplier is selected, a list of available products is fetched via
+      the `/api/suppliers/{id}/items` endpoint. Users can add multiple items
+      to the order and specify quantities — prices are not collected at this
+      stage because they will be determined later by the supplier. Each item
+      row includes a delete button so rows can be removed before submission.
+    -->
+    <x-slot:title>Buat Purchase Order</x-slot:title>
 
-  <div class="container">
-    <h1 class="text-xl font-bold mb-4">Buat Purchase Order</h1>
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Buat Purchase Order</h5>
+                    <!-- Link back to the PO index page -->
+                    <a href="{{ route('purchase-orders.index') }}"
+                       class="btn btn-warning btn-sm text-white">Kembali</a>
+                </div>
+                <div class="card-body">
+                    <!-- Display validation errors -->
+                    @if ($errors->any())
+                        <div class="alert alert-danger">
+                            <ul class="mb-0">
+                                @foreach ($errors->all() as $error)
+                                    <li>{{ $error }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    @endif
 
-    @if ($errors->any())
-  <div class="bg-red-100 text-red-700 p-4 rounded mb-4">
-    <ul class="list-disc pl-5">
-      @foreach ($errors->all() as $error)
-        <li>{{ $error }}</li>
-      @endforeach
-    </ul>
-  </div>
-@endif
-    <form method="POST" action="{{ route('purchase-orders.store') }}">
-      @csrf
+                    <form method="POST" action="{{ route('purchase-orders.store') }}">
+                        @csrf
+                        <div class="form-group mb-3">
+                            <label for="supplier_id" class="form-label">Supplier <span class="text-danger">*</span></label>
+                            <select name="supplier_id" id="supplier_id" class="form-select" required>
+                                <option value="">Pilih Supplier</option>
+                                @foreach($suppliers as $supplier)
+                                    <option value="{{ $supplier->id }}">{{ $supplier->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
 
-      <div class="mb-4">
-        <label for="supplier_id" class="block font-semibold">Supplier</label>
-        <select name="supplier_id" id="supplier_id" required class="w-full border px-2 py-1 rounded">
-          <option value="">-- Pilih Supplier --</option>
-          @foreach($suppliers as $supplier)
-            <option value="{{ $supplier->id }}">{{ $supplier->name }}</option>
-          @endforeach
-        </select>
-      </div>
+                        <div class="form-group mb-3">
+                            <label for="po_date" class="form-label">Tanggal PO <span class="text-danger">*</span></label>
+                            <input type="date" name="po_date" id="po_date" class="form-control" required>
+                        </div>
 
-      <div class="mb-4">
-        <label for="po_date" class="block font-semibold">Tanggal PO</label>
-        <input type="date" name="po_date" required class="w-full border px-2 py-1 rounded">
-      </div>
+                        <!-- Container for dynamic item rows -->
+                        <div id="items-container" class="mb-2">
+                            <h6 class="fw-bold">Barang</h6>
+                        </div>
 
-      <div id="items-container">
-        <h3 class="font-bold mt-4">Barang</h3>
-      </div>
+                        <!-- Button to add new item row; hidden until a supplier is selected -->
+                        <button type="button" id="addItemBtn" onclick="addItemRow()"
+                                class="btn btn-secondary btn-sm d-none">Tambah Barang</button>
 
-      <button type="button" onclick="addItemRow()" id="addItemBtn"
-        class="bg-gray-600 text-white px-3 py-1 rounded mt-2 hidden">Tambah Barang</button>
+                        <div class="mt-4">
+                            <button type="submit" class="btn btn-primary">Simpan PO</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
 
-      <br><br>
-      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Simpan PO</button>
-    </form>
-  </div>
+    <script>
+        // Keep track of the current index for form array inputs
+        let itemIndex = 0;
+        // Will hold the list of products returned by the supplier API
+        let itemsList = [];
 
-  <script>
-    let itemIndex = 0;
-    let itemsList = [];
+        // When the supplier dropdown changes, fetch products for that supplier
+        document.getElementById('supplier_id').addEventListener('change', function () {
+            const supplierId = this.value;
+            // Hide the 'add item' button and clear any existing item rows if no supplier is selected
+            document.getElementById('addItemBtn').classList.add('d-none');
+            document.getElementById('items-container').innerHTML = '<h6 class="fw-bold">Barang</h6>';
+            itemIndex = 0;
 
-    document.getElementById('supplier_id').addEventListener('change', function () {
-      const supplierId = this.value;
-      if (!supplierId) return;
+            if (!supplierId) {
+                return;
+            }
 
-      fetch(`/supplier/${supplierId}/products`)
-        .then(response => response.json())
-        .then(data => {
-          itemsList = data;
-          itemIndex = 0;
-          document.getElementById('items-container').innerHTML = '<h3 class="font-bold mt-4">Barang</h3>';
-          document.getElementById('addItemBtn').classList.remove('hidden');
-          addItemRow();
-        })
-        .catch(error => console.error('Gagal mengambil produk:', error));
-    });
+            // Fetch products from the correct API endpoint
+            fetch(`/api/suppliers/${supplierId}/items`)
+                .then(response => response.json())
+                .then(data => {
+                    itemsList = data;
+                    // Reveal the button to add items now that products are loaded
+                    document.getElementById('addItemBtn').classList.remove('d-none');
+                    // Add an initial item row automatically for convenience
+                    addItemRow();
+                })
+                .catch(error => console.error('Gagal mengambil produk:', error));
+        });
 
-    function addItemRow() {
-      const container = document.getElementById('items-container');
-      const row = document.createElement('div');
-      row.classList.add('item-row', 'mb-3', 'p-2', 'border', 'rounded', 'bg-gray-50');
+        /**
+         * Create a new row for item inputs.
+         * Setiap baris memungkinkan pengguna memilih produk dan memasukkan jumlah.
+         * Harga satuan tidak diinput di sini karena akan ditentukan oleh supplier.
+         * Setiap baris juga memiliki tombol hapus untuk menghapus baris jika diperlukan.
+         */
+        function addItemRow() {
+            const container = document.getElementById('items-container');
+            const row = document.createElement('div');
+            row.classList.add('row', 'align-items-end', 'g-2', 'mb-2');
 
-      let options = '<option value="">-- Pilih Barang --</option>';
-      itemsList.forEach(item => {
-        options += `<option value="${item.product_name}">${item.product_name}</option>`;
-      });
+            // Build the product options for this supplier
+            let options = '<option value="">Pilih Barang</option>';
+            itemsList.forEach(item => {
+                options += `<option value="${item.product_name}">${item.product_name}</option>`;
+            });
 
-      row.innerHTML = `
-        <select name="items[${itemIndex}][product_name]" class="w-full border px-2 py-1 mb-2 rounded" required>
-            ${itemsList.map(p => `<option value="${p.product_name}">${p.product_name}</option>`).join('')}
-        </select>
-        <input type="number" name="items[${itemIndex}][quantity]" placeholder="Qty" class="w-full border px-2 py-1 mb-2 rounded" required>
-        <input type="number" name="items[${itemIndex}][unit_price]" placeholder="Harga Satuan" class="w-full border px-2 py-1 rounded" required>
-      `;
+            // Insert columns for product select and quantity. Harga tidak diinput pada tahap ini.
+            row.innerHTML = `
+                <div class="col-md-8">
+                    <select name="items[${itemIndex}][product_name]" class="form-select" required>
+                        ${options}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <input type="number" name="items[${itemIndex}][quantity]" class="form-control" placeholder="Qty" min="1" required>
+                </div>
+                <div class="col-md-1 text-end">
+                    <button type="button" class="btn btn-danger btn-sm remove-item-row" title="Hapus">&times;</button>
+                </div>
+            `;
 
-      container.appendChild(row);
-      itemIndex++;
-    }
-  </script>
+            // Attach an event listener to remove the row when the delete button is clicked
+            row.querySelector('.remove-item-row').addEventListener('click', function () {
+                row.remove();
+            });
+
+            container.appendChild(row);
+            itemIndex++;
+        }
+    </script>
 </x-layout>

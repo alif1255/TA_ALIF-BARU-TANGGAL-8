@@ -91,8 +91,22 @@ Route::middleware('auth')->group(function () {
      */
     Route::get('/transaction/online-orders', [TransactionController::class, 'onlineOrders'])
         ->name('transaction.online');
-    Route::post('/transaction/online-orders/{transaction}/process', [TransactionController::class, 'processOnline'])
-        ->name('transaction.online.process');
+    Route::post('/transaction/online-orders/{order}/process', [TransactionController::class, 'processOnline'])
+    ->name('transaction.online.process');
+
+    // Pesanan marketplace menunggu diambil
+Route::get('/transaction/marketplace-online-orders', [TransactionController::class, 'marketplaceOnlineOrders'])
+    ->name('transaction.marketplace.online');
+
+// Menampilkan detail item untuk pesanan marketplace tertentu
+Route::get('/transaction/marketplace-online-orders/{order}/items', [TransactionController::class, 'marketplaceOrderItems'])
+    ->name('transaction.marketplace.items');
+
+// Memproses pesanan marketplace (pembayaran dan pengambilan)
+Route::post('/transaction/marketplace-online-orders/{order}/process', [TransactionController::class, 'processMarketplaceOrder'])
+    ->name('transaction.marketplace.process');
+
+
 
     /*
      * TRANSACTIONS

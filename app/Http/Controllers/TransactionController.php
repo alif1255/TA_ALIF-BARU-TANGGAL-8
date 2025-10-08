@@ -14,6 +14,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;
+use Illuminate\Support\Facades\DB;
 
 class TransactionController extends Controller
 {
@@ -233,23 +234,39 @@ public function index(): View
      */
     public function onlineOrders()
     {
-        $orders = Transaction::with(['user'])
-            ->where('status', 'debt')
-            ->whereHas('user', function ($q) {
-                $q->where('role', 'customer');
-            })
-            ->orderBy('created_at', 'asc')
+        // Ambil pesanan marketplace yang belum diambil, gabung dengan tabel users untuk nama customer
+        $orders = DB::table('marketplace_orders as mo')
+            ->join('users as u', 'mo.user_id', '=', 'u.id')
+            ->select(
+                'mo.id',
+                'mo.code',
+                'mo.pickup_name',
+                'mo.phone',
+                'mo.total_price',
+                'mo.created_at',
+                'mo.status',
+                'u.name as customer_name'
+            )
+            ->where('mo.status', 'pending_pickup')
+            ->orderBy('mo.created_at', 'asc')
             ->get();
 
         $payment_methods = PaymentMethod::orderBy('name')->get();
 
-        return view('transaction.online', compact('orders', 'payment_methods'));
+        return view('transaction.online', [
+            'orders'          => $orders,
+            'payment_methods' => $payment_methods,
+        ]);
     }
 
-
-     public function processOnline(Request $request, Transaction $transaction)
+    /**
+     * Proses pembayaran pesanan marketplace (online) di kasir.
+     * Menerima ID marketplace_order sebagai parameter.
+     */
+    public function processOnline(Request $request, $orderId)
     {
-        if ($transaction->status !== 'debt' || optional($transaction->user)->role !== 'customer') {
+        $order = DB::table('marketplace_orders')->where('id', $orderId)->first();
+        if (!$order || $order->status !== 'pending_pickup') {
             return response()->json([
                 'status'  => 'error',
                 'message' => 'Pesanan tidak valid atau sudah diproses.'
@@ -258,18 +275,25 @@ public function index(): View
 
         $validated = $request->validate([
             'payment_method' => 'required|string',
-            'amount'         => 'nullable|numeric|min:0', // khusus tunai
+            'amount'         => 'nullable|numeric|min:0',
             'change'         => 'nullable|numeric|min:0',
             'note'           => 'nullable|string|max:255',
         ]);
 
-        $total  = (int) $transaction->total;
-        $method = $validated['payment_method'];
-        $isCash = strtolower($method) === 'tunai';
-        $amount = (int) ($validated['amount'] ?? 0);
-        $change = (int) ($validated['change'] ?? 0);
+        $methodName = $validated['payment_method'];
+        $payment    = PaymentMethod::where('name', $methodName)->first();
+        if (!$payment) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Metode pembayaran tidak ditemukan.'
+            ], 422);
+        }
 
-        // Validasi untuk pembayaran tunai: jumlah uang harus cukup
+        $total  = (int) $order->total_price;
+        $isCash = strtolower($methodName) === 'tunai';
+        $amount = $isCash ? (int) ($validated['amount'] ?? 0) : $total;
+        $change = $isCash ? max(0, (int) ($validated['change'] ?? 0)) : 0;
+
         if ($isCash && $amount < $total) {
             return response()->json([
                 'status'  => 'error',
@@ -277,15 +301,77 @@ public function index(): View
             ], 422);
         }
 
-        // Gunakan logika pembayaran yang sama dengan offline
-        $this->finalizePaymentCommon($transaction, $method, $amount, $change, $validated['note'] ?? null);
+        $note = $validated['note'] ?? null;
 
-        // Kosongkan keranjang customer terkait (jika masih ada sisa)
-        Cart::where('user_id', $transaction->user_id)->delete();
+        DB::transaction(function () use ($order, $payment, $amount, $change, $note) {
+            $orderLocked = DB::table('marketplace_orders')
+                ->where('id', $order->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$orderLocked || $orderLocked->status !== 'pending_pickup') {
+                abort(400, 'Order tidak dalam status pending_pickup.');
+            }
+
+            $items = DB::table('marketplace_order_items')
+                ->where('order_id', $orderLocked->id)
+                ->get();
+
+            $today   = now()->format('dmy');
+            $last    = DB::table('transactions')
+                ->whereDate('created_at', now()->toDateString())
+                ->orderByDesc('id')
+                ->first();
+            $seq     = $last ? ((int) $last->invoice_no + 1) : 1;
+            $invoice = $today . str_pad($seq, 4, '0', STR_PAD_LEFT);
+
+            $trxId = DB::table('transactions')->insertGetId([
+                'user_id'           => auth()->id(),
+                'channel'           => 'online',
+                'payment_status'    => 'paid',
+                'pickup_status'     => 'picked_up',
+                'pickup_code'       => $orderLocked->code,
+                'customer_id'       => $orderLocked->user_id,
+                'invoice'           => $invoice,
+                'invoice_no'        => (string) $seq,
+                'total'             => (int) $orderLocked->total_price,
+                'discount'          => 0,
+                'payment_method_id' => $payment->id,
+                'amount'            => $amount,
+                'change'            => $change,
+                'status'            => 'paid',
+                'note'              => trim(implode(' | ', array_filter([
+                    'Marketplace pickup: ' . $orderLocked->pickup_name . ' (' . $orderLocked->phone . ')',
+                    $note,
+                ]))),
+                'created_at'        => now(),
+                'updated_at'        => now(),
+            ]);
+
+            foreach ($items as $i) {
+                DB::table('transaction_details')->insert([
+                    'transaction_id' => $trxId,
+                    'item_id'        => $i->item_id,
+                    'qty'            => (int) $i->qty,
+                    'item_price'     => (int) $i->price,
+                    'total'          => (int) $i->price * (int) $i->qty,
+                    'created_at'     => now(),
+                    'updated_at'     => now(),
+                ]);
+            }
+
+            DB::table('marketplace_orders')
+                ->where('id', $orderLocked->id)
+                ->update([
+                    'status'     => 'completed',
+                    'updated_at' => now(),
+                ]);
+        });
 
         return response()->json([
             'status'  => 'success',
             'message' => 'Transaksi online berhasil diproses.'
         ]);
     }
+
 }

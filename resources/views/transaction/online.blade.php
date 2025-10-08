@@ -1,226 +1,265 @@
-{{-- resources/views/transaction/online.blade.php --}}
+{{--
+  Improved version of resources/views/transaction/online.blade.php
+  for marketplace orders. This template displays marketplace orders
+  waiting to be picked up (status pending_pickup) and provides
+  a modal to process them at the cashier.
+--}}
+
 <x-layout>
-  <x-slot:title>Pesanan Online (Menunggu Diambil)</x-slot:title>
+    <x-slot:title>Pesanan Marketplace (Menunggu Diambil)</x-slot:title>
 
-  <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <h5 class="mb-0">Daftar Pesanan Online</h5>
-      <a href="{{ route('transaction.index') }}" class="btn btn-outline-secondary btn-sm">← POS / Transaksi</a>
-    </div>
-    <div class="card-body">
-      <div class="table-responsive">
-        <table class="table" id="online-orders-table">
-          <thead>
-            <tr>
-              <th>No</th>
-              <th>Faktur</th>
-              <th>Pelanggan</th>
-              <th>Total</th>
-              <th>Tanggal</th>
-              <th>Status</th>
-              <th style="width:160px">Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            @foreach($orders as $order)
-              <tr>
-                <td>{{ $loop->iteration }}</td>
-                <td>{{ $order->invoice }}</td>
-                <td>{{ optional($order->user)->name }}</td>
-                <td>@indo_currency($order->total)</td>
-                <td>{{ $order->created_at->format('d-m-Y H:i') }}</td>
-                <td><span class="badge bg-warning text-dark">Menunggu Diambil</span></td>
-                <td>
-                  {{-- Tombol detail transaksi opsional --}}
-                  <button class="btn btn-sm btn-info" data-id="{{ $order->id }}" onclick="showDetail(this)">
-                    <i class="fas fa-list"></i> Detail
-                  </button>
-
-                  {{-- Tombol proses pembayaran --}}
-                  <button class="btn btn-sm btn-success text-white"
-                          data-id="{{ $order->id }}"
-                          data-invoice="{{ $order->invoice }}"
-                          data-total="{{ (int) $order->total }}"
-                          onclick="openProcess(this)">
-                    <i class="fas fa-check"></i> Proses
-                  </button>
-                </td>
-              </tr>
-            @endforeach
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  {{-- Modal proses pembayaran --}}
-  <div class="modal fade" id="process_modal" tabindex="-1" aria-labelledby="processLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="processLabel">Proses Pembayaran</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Daftar Pesanan Marketplace</h5>
+            <a href="{{ route('transaction.index') }}" class="btn btn-outline-secondary btn-sm">← POS / Transaksi</a>
         </div>
-        <div class="modal-body">
-          <form id="process_form" onsubmit="return false;">
-            @csrf
-            <input type="hidden" id="order_id">
-            <div class="mb-2">
-              <label class="form-label">Faktur</label>
-              <input type="text" class="form-control" id="faktur" readonly>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped" id="marketplace-orders-table">
+                    <thead>
+                        <tr>
+                            <th>No</th>
+                            <th>Kode Pesanan</th>
+                            <th>Nama Pengambil</th>
+                            <th>No. HP</th>
+                            <th>Total</th>
+                            <th>Tanggal</th>
+                            <th style="width:160px">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse($orders as $order)
+                            <tr>
+                                <td>{{ $loop->iteration }}</td>
+                                <td>{{ $order->code }}</td>
+                                <td>{{ $order->pickup_name ?? $order->customer_name }}</td>
+                                <td>{{ $order->phone }}</td>
+                                <td>@indo_currency($order->total_price)</td>
+                                <td>{{ \Carbon\Carbon::parse($order->created_at)->format('d-m-Y H:i') }}</td>
+                                <td>
+                                    {{-- Tombol detail opsional (menampilkan item pesanan) --}}
+                                    <button class="btn btn-sm btn-info" data-id="{{ $order->id }}" onclick="showOrderDetail(this)">
+                                        <i class="fas fa-list"></i> Detail
+                                    </button>
+
+                                    {{-- Tombol proses pembayaran/pengambilan --}}
+                                    <button class="btn btn-sm btn-success text-white"
+                                            data-id="{{ $order->id }}"
+                                            data-code="{{ $order->code }}"
+                                            data-total="{{ (int) $order->total_price }}"
+                                            onclick="openMarketplaceProcess(this)">
+                                        <i class="fas fa-check"></i> Proses
+                                    </button>
+                                </td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="7" class="text-center text-muted">Belum ada pesanan marketplace yang menunggu.</td>
+                            </tr>
+                        @endforelse
+                    </tbody>
+                </table>
             </div>
-            <div class="mb-2">
-              <label class="form-label">Total</label>
-              <input type="text" class="form-control" id="total_fmt" readonly>
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Metode Pembayaran</label>
-              <select id="metode" class="form-select">
-                @foreach($payment_methods as $pm)
-                  <option value="{{ $pm->name }}">{{ $pm->name }}</option>
-                @endforeach
-              </select>
-            </div>
-            <div class="mb-2" id="cash_wrap">
-              <label class="form-label">Uang Diterima (Tunai)</label>
-              <div class="input-group">
-                <input type="text" class="form-control" id="amount" placeholder="Masukkan uang tunai">
-                <button class="btn btn-outline-secondary" type="button" id="btn_exact">Uang Pas</button>
-              </div>
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Kembalian</label>
-              <input type="text" class="form-control" id="change" readonly>
-            </div>
-            <div class="mb-0">
-              <label class="form-label">Catatan (opsional)</label>
-              <textarea id="note" class="form-control" placeholder="Pesanan online diambil"></textarea>
-            </div>
-          </form>
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-          <button class="btn btn-primary" id="btn_process_confirm">Selesaikan</button>
-        </div>
-      </div>
     </div>
-  </div>
 
-  @push('scripts')
-  <script>
-    // Inisialisasi DataTable
-    $(function(){
-      if ($.fn.DataTable) {
-        $('#online-orders-table').DataTable({ pageLength: 10, order: [[4,'asc']] });
-      }
-    });
+    {{-- Modal proses pesanan marketplace --}}
+    <div class="modal fade" id="process_marketplace_modal" tabindex="-1" aria-labelledby="processMarketplaceLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="processMarketplaceLabel">Proses Pengambilan Pesanan</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="marketplace_process_form" onsubmit="return false;">
+                        @csrf
+                        <input type="hidden" id="mp_order_id">
+                        <div class="mb-2">
+                            <label class="form-label">Kode Pesanan</label>
+                            <input type="text" class="form-control" id="mp_code" readonly>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Total</label>
+                            <input type="text" class="form-control" id="mp_total_fmt" readonly>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Metode Pembayaran</label>
+                            <select id="mp_metode" class="form-select">
+                                @foreach($payment_methods as $pm)
+                                    <option value="{{ $pm->name }}">{{ $pm->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="mb-2" id="mp_cash_wrap">
+                            <label class="form-label">Uang Diterima (Tunai)</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="mp_amount" placeholder="Masukkan uang tunai">
+                                <button class="btn btn-outline-secondary" type="button" id="mp_btn_exact">Uang Pas</button>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Kembalian</label>
+                            <input type="text" class="form-control" id="mp_change" readonly>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">Catatan (opsional)</label>
+                            <textarea id="mp_note" class="form-control" placeholder="Catatan pesanan"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button class="btn btn-primary" id="mp_btn_process_confirm">Selesaikan</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
-    // Tampilkan modal detail transaksi (opsional)
-    function showDetail(btn) {
-      const id = btn.dataset.id;
-      $.get(`/report/transaction/${id}`, function(html) {
-        $('#transaction_detail_modal .modal-body').html(html);
-        $('#transaction_detail_modal').modal('show');
-      }).fail(function(){
-        toastr.error('Gagal memuat detail.');
-      });
-    }
+    @push('scripts')
+        <script>
+            // Fallback currency formatter using Intl API
+            function mpFormatCurrency(num) {
+                try {
+                    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(num);
+                } catch (e) {
+                    return num;
+                }
+            }
 
-    // Buka modal proses pembayaran dan isi data pesanan
-    function openProcess(btn) {
-      const id      = btn.dataset.id;
-      const invoice = btn.dataset.invoice;
-      const total   = parseInt(btn.dataset.total || 0);
+            $(function() {
+                // Initialize DataTable for marketplace orders
+                const mpTable = $('#marketplace-orders-table').DataTable({
+                    pageLength: 10,
+                    order: [[5, 'asc']],
+                    language: typeof datatableLanguageOptions !== 'undefined' ? datatableLanguageOptions : undefined,
+                    columnDefs: [
+                        { targets: [6], orderable: false, searchable: false }
+                    ]
+                });
+                window.tableMarketplaceOrders = mpTable;
+            });
 
-      $('#order_id').val(id);
-      $('#faktur').val(invoice);
+            // Show details of marketplace order (optional implementation)
+            function showOrderDetail(btn) {
+                const id = btn.dataset.id;
+                // Anda bisa membuat endpoint untuk mengembalikan detail
+                $.get(`/marketplace/order/${id}`, function(html) {
+                    $('#transaction_detail_modal .modal-body').html(html);
+                    $('#transaction_detail_modal').modal('show');
+                }).fail(function() {
+                    toastr.error('Gagal memuat detail pesanan.');
+                });
+            }
 
-      if (typeof indo_currency === 'function') {
-        $('#total_fmt').val(indo_currency(total, true));
-      } else {
-        $('#total_fmt').val(total);
-      }
+            // Open modal and prefill for marketplace order processing
+            function openMarketplaceProcess(btn) {
+                const id    = btn.dataset.id;
+                const code  = btn.dataset.code;
+                const total = parseInt(btn.dataset.total || 0);
 
-      $('#metode').val('Tunai').trigger('change');
-      $('#amount').val('');
-      $('#change').val('');
-      $('#note').val('');
-      $('#process_modal').modal('show');
-    }
+                $('#mp_order_id').val(id);
+                $('#mp_code').val(code);
+                if (typeof indo_currency === 'function') {
+                    $('#mp_total_fmt').val(indo_currency(total, true));
+                } else {
+                    $('#mp_total_fmt').val(mpFormatCurrency(total));
+                }
+                // reset payment fields
+                $('#mp_metode').val($('#mp_metode option:first').val()).trigger('change');
+                $('#mp_amount').val('');
+                $('#mp_change').val('');
+                $('#mp_note').val('');
+                $('#mp_btn_process_confirm').prop('disabled', false);
+                $('#process_marketplace_modal').modal('show');
+            }
 
-    // Tampilkan/ sembunyikan input uang tunai berdasarkan metode
-    $('#metode').on('change', function() {
-      const isCash = $(this).val() === 'Tunai';
-      if (isCash) {
-        $('#cash_wrap').show();
-        $('#amount').val('');
-        $('#change').val('');
-      } else {
-        $('#cash_wrap').hide();
-        const total = parseInt(($('#total_fmt').val() || '').replace(/\D/g,'')) || 0;
-        $('#amount').val(total);
-        $('#change').val(0);
-      }
-    });
+            // Toggle cash fields based on selected payment method
+            $('#mp_metode').on('change', function() {
+                const isCash = $(this).val().toLowerCase() === 'tunai';
+                if (isCash) {
+                    $('#mp_cash_wrap').show();
+                    $('#mp_amount').val('');
+                    $('#mp_change').val('');
+                } else {
+                    $('#mp_cash_wrap').hide();
+                    const total = parseInt(($('#mp_total_fmt').val() || '').replace(/\D/g, '')) || 0;
+                    $('#mp_amount').val(total);
+                    $('#mp_change').val(0);
+                }
+            });
 
-    // Hitung kembalian real-time
-    $('#amount').on('input', function() {
-      const paid  = parseInt(($(this).val() || '').replace(/\D/g,'')) || 0;
-      const total = parseInt(($('#total_fmt').val() || '').replace(/\D/g,'')) || 0;
-      const chg   = paid - total;
-      if (typeof indo_currency === 'function') {
-        $('#change').val(chg >= 0 ? indo_currency(chg, true) : '');
-      } else {
-        $('#change').val(chg >= 0 ? chg : '');
-      }
-    });
+            // Calculate change for cash payments
+            $('#mp_amount').on('input', function() {
+                const paid  = parseInt(($(this).val() || '').replace(/\D/g, '')) || 0;
+                const total = parseInt(($('#mp_total_fmt').val() || '').replace(/\D/g, '')) || 0;
+                const chg   = paid - total;
+                if (typeof indo_currency === 'function') {
+                    $('#mp_change').val(chg >= 0 ? indo_currency(chg, true) : '');
+                } else {
+                    $('#mp_change').val(chg >= 0 ? mpFormatCurrency(chg) : '');
+                }
+            });
 
-    // Isi uang pas sesuai total
-    $('#btn_exact').on('click', function() {
-      const total = parseInt(($('#total_fmt').val() || '').replace(/\D/g,'')) || 0;
-      if (typeof indo_currency === 'function') {
-        $('#amount').val(indo_currency(total, true));
-      } else {
-        $('#amount').val(total);
-      }
-      $('#change').val(0);
-    });
+            // Set cash amount equal to total
+            $('#mp_btn_exact').on('click', function() {
+                const total = parseInt(($('#mp_total_fmt').val() || '').replace(/\D/g, '')) || 0;
+                if (typeof indo_currency === 'function') {
+                    $('#mp_amount').val(indo_currency(total, true));
+                } else {
+                    $('#mp_amount').val(mpFormatCurrency(total));
+                }
+                $('#mp_change').val(0);
+            });
 
-    // Kirim permintaan proses pembayaran
-    $('#btn_process_confirm').on('click', function() {
-      const id      = $('#order_id').val();
-      const method  = $('#metode').val();
-      const amountN = parseInt(($('#amount').val() || '').replace(/\D/g,'')) || 0;
-      const totalN  = parseInt(($('#total_fmt').val()  || '').replace(/\D/g,'')) || 0;
+            // Submit marketplace order processing
+            $('#mp_btn_process_confirm').on('click', function() {
+                const $btn  = $(this);
+                $btn.prop('disabled', true);
+                const id    = $('#mp_order_id').val();
+                const method= $('#mp_metode').val();
+                const amountN= parseInt(($('#mp_amount').val() || '').replace(/\D/g, '')) || 0;
+                const totalN = parseInt(($('#mp_total_fmt').val() || '').replace(/\D/g, '')) || 0;
 
-      if (method === 'Tunai' && amountN < totalN) {
-        return toastr.warning('Uang tunai kurang dari total!');
-      }
+                // Validate cash
+                if (method.toLowerCase() === 'tunai' && amountN < totalN) {
+                    toastr.warning('Uang tunai kurang dari total!');
+                    $btn.prop('disabled', false);
+                    return;
+                }
 
-      const changeN = amountN - totalN;
-      const note    = $('#note').val();
+                const changeN = amountN - totalN;
+                const note    = $('#mp_note').val();
 
-      $.ajax({
-        url: `/transaction/online-orders/${id}/process`,
-        type: 'POST',
-        headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-        data: { payment_method: method, amount: amountN, change: changeN, note },
-        success: function(res) {
-          if (res.status === 'success') {
-            toastr.success(res.message || 'Berhasil diproses.');
-            $('#process_modal').modal('hide');
-            // Hapus baris dari tabel
-            $(`#online-orders-table button[data-id="${id}"]`).closest('tr').remove();
-          } else {
-            toastr.error(res.message || 'Gagal memproses.');
-          }
-        },
-        error: function(err) {
-          console.error(err);
-          toastr.error('Gagal memproses.');
-        }
-      });
-    });
-  </script>
-  @endpush
+                $.ajax({
+                    url: `/transaction/online-orders/${id}/process`,
+                    type: 'POST',
+                    headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                    data: { payment_method: method, amount: amountN, change: changeN, note: note },
+                    success: function(res) {
+                        if (res.status === 'success') {
+                            toastr.success(res.message || 'Berhasil diproses.');
+                            $('#process_marketplace_modal').modal('hide');
+                            // Remove row from DataTable
+                            const row = $('#marketplace-orders-table button[data-id="' + id + '"]').closest('tr');
+                            if (window.tableMarketplaceOrders) {
+                                window.tableMarketplaceOrders.row(row).remove().draw();
+                            } else {
+                                row.remove();
+                            }
+                        } else {
+                            toastr.error(res.message || 'Gagal memproses.');
+                        }
+                    },
+                    error: function(err) {
+                        console.error(err);
+                        toastr.error('Gagal memproses.');
+                    },
+                    complete: function() {
+                        $btn.prop('disabled', false);
+                    }
+                });
+            });
+        </script>
+    @endpush
 </x-layout>
